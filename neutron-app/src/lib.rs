@@ -104,17 +104,17 @@ fn android_main(app: android_activity::AndroidApp) {
         }
     });
 
-    // Keep a reference for cleanup after UI exits
-    let launcher_cleanup = launcher.clone();
-
     // Run the Slint event loop (this blocks until the app is closed)
     info!("Starting Slint UI event loop...");
     ui.run().unwrap();
 
-    // Cleanup on exit
+    // Cleanup on exit — stop all virtual processes
     info!("App exiting — stopping all virtual processes");
-    if let Ok(mut l) = launcher_cleanup.lock() {
-        let _ = l.stop_all();
+    {
+        let lock = launcher.lock();
+        if let Ok(mut l) = lock {
+            let _ = l.stop_all();
+        }
     }
 }
 
