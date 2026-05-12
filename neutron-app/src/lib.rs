@@ -3,7 +3,7 @@
 //! Pure Rust Android app using NativeActivity + Slint UI. No Java/Kotlin code.
 //! This is the top-level binary that ties all crates together.
 
-use log::{info, error};
+use log::info;
 use neutron_core::{NeutronConfig, ImportSource, VirtualApp};
 use neutron_engine::AppLauncher;
 use neutron_apk::ApkInstaller;
@@ -51,7 +51,7 @@ fn android_main(app: android_activity::AndroidApp) {
     // --- Wire up callbacks ---
 
     // Import APK callback
-    let installer_clone = installer.clone();
+    let _installer_ref = installer.clone();
     let ui_weak = ui.as_weak();
     ui.on_import_apk(move || {
         info!("Import APK requested");
@@ -66,7 +66,7 @@ fn android_main(app: android_activity::AndroidApp) {
     });
 
     // Launch app callback
-    let launcher_clone = launcher.clone();
+    let _launcher_ref = launcher.clone();
     let ui_weak = ui.as_weak();
     ui.on_launch_app(move |app_id| {
         info!("Launch app requested: id={}", app_id);
@@ -76,7 +76,7 @@ fn android_main(app: android_activity::AndroidApp) {
     });
 
     // Stop app callback
-    let launcher_clone2 = launcher.clone();
+    let _launcher_ref2 = launcher.clone();
     let ui_weak = ui.as_weak();
     ui.on_stop_app(move |app_id| {
         info!("Stop app requested: id={}", app_id);
@@ -86,7 +86,7 @@ fn android_main(app: android_activity::AndroidApp) {
     });
 
     // Uninstall app callback
-    let installer_clone2 = installer.clone();
+    let _installer_ref2 = installer.clone();
     let ui_weak = ui.as_weak();
     ui.on_uninstall_app(move |app_id| {
         info!("Uninstall app requested: id={}", app_id);
@@ -104,13 +104,16 @@ fn android_main(app: android_activity::AndroidApp) {
         }
     });
 
+    // Keep a reference for cleanup after UI exits
+    let launcher_cleanup = launcher.clone();
+
     // Run the Slint event loop (this blocks until the app is closed)
     info!("Starting Slint UI event loop...");
     ui.run().unwrap();
 
     // Cleanup on exit
     info!("App exiting — stopping all virtual processes");
-    if let Ok(mut l) = launcher.lock() {
+    if let Ok(mut l) = launcher_cleanup.lock() {
         let _ = l.stop_all();
     }
 }
