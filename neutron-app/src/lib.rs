@@ -108,14 +108,8 @@ fn android_main(app: android_activity::AndroidApp) {
     info!("Starting Slint UI event loop...");
     ui.run().unwrap();
 
-    // Cleanup on exit — stop all virtual processes
-    info!("App exiting — stopping all virtual processes");
-    {
-        let lock = launcher.lock();
-        if let Ok(mut l) = lock {
-            let _ = l.stop_all();
-        }
-    }
+    // Process exit will clean up all child processes automatically
+    info!("App exiting");
 }
 
 /// Import an APK/XAPK from the filesystem.
