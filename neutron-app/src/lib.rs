@@ -13,54 +13,59 @@ use std::path::Path;
 // Include the compiled Slint UI
 slint::include_modules!();
 
-/// Scan a directory for APK/XAPK files and subdirectories.
+/// Scan a directory and return FileEntry items for the UI.
+/// Shows directories + APK/XAPK files only.
 fn scan_directory(dir_path: &str) -> Vec<FileEntry> {
     let mut entries = Vec::new();
     let path = Path::new(dir_path);
 
     if let Ok(read_dir) = std::fs::read_dir(path) {
         let mut items: Vec<_> = read_dir.filter_map(|e| e.ok()).collect();
-        // Sort: directories first, then by name
+        // Sort: directories first, then alphabetical
         items.sort_by(|a, b| {
-            let a_is_dir = a.file_type().map(|t| t.is_dir()).unwrap_or(false);
-            let b_is_dir = b.file_type().map(|t| t.is_dir()).unwrap_or(false);
-            match (a_is_dir, b_is_dir) {
+            let a_dir = a.file_type().map(|t| t.is_dir()).unwrap_or(false);
+            let b_dir = b.file_type().map(|t| t.is_dir()).unwrap_or(false);
+            match (a_dir, b_dir) {
                 (true, false) => std::cmp::Ordering::Less,
                 (false, true) => std::cmp::Ordering::Greater,
                 _ => a.file_name().cmp(&b.file_name()),
             }
         });
 
+        let mut idx = 0i32;
         for entry in items {
             let name = entry.file_name().to_string_lossy().to_string();
             let full_path = entry.path().to_string_lossy().to_string();
             let is_dir = entry.file_type().map(|t| t.is_dir()).unwrap_or(false);
 
-            // Skip hidden files
+            // Skip hidden files/folders
             if name.starts_with('.') {
                 continue;
             }
 
             if is_dir {
                 entries.push(FileEntry {
+                    index: idx,
                     name: name.into(),
                     path: full_path.into(),
                     size_mb: "".into(),
                     is_dir: true,
                 });
+                idx += 1;
             } else {
-                // Only show APK and XAPK files
                 let lower = name.to_lowercase();
                 if lower.ends_with(".apk") || lower.ends_with(".xapk") || lower.ends_with(".apks") {
                     let size = entry.metadata()
                         .map(|m| m.len() as f64 / (1024.0 * 1024.0))
                         .unwrap_or(0.0);
                     entries.push(FileEntry {
+                        index: idx,
                         name: name.into(),
                         path: full_path.into(),
                         size_mb: format!("{:.1}", size).into(),
                         is_dir: false,
                     });
+                    idx += 1;
                 }
             }
         }
@@ -81,7 +86,7 @@ fn android_main(app: android_activity::AndroidApp) {
 
     info!("Neutron Space v1.0 starting...");
 
-    // Initialize the Slint Android backend with our AndroidApp handle
+    // Initialize the Slint Android backend
     slint::android::init(app.clone()).unwrap();
 
     // Get the app's internal data directory
@@ -99,36 +104,41 @@ fn android_main(app: android_activity::AndroidApp) {
 
     info!("Neutron initialized. Data dir: {}", data_dir);
 
-    // Create and show the Slint UI
+    // Create the UI
     let ui = NeutronApp::new().unwrap();
-
-    // Set initial status
     ui.set_status_text("Ready — Tap Import to add APK/XAPK files".into());
 
-    // --- Wire up callbacks ---
+    // Shared state for the current file list (so file-tap can look up by index)
+    let file_entries: Arc<Mutex<Vec<FileEntry>>> = Arc::new(Mutex::new(Vec::new()));
 
-    // Import APK — opens the built-in file browser
+    // --- Import APK: opens file browser ---
     let ui_weak = ui.as_weak();
+    let file_entries_clone = file_entries.clone();
     ui.on_import_apk(move || {
-        info!("Opening file browser...");
+        info!("Opening file browser");
         if let Some(ui) = ui_weak.upgrade() {
             let start_dir = "/storage/emulated/0";
             ui.set_current_path(start_dir.into());
             let files = scan_directory(start_dir);
-            let model: Vec<FileEntry> = files;
-            ui.set_file_list(slint::ModelRc::new(slint::VecModel::from(model)));
+            
+            // Store for index lookup
+            if let Ok(mut fe) = file_entries_clone.lock() {
+                *fe = files.clone();
+            }
+            
+            ui.set_file_list(slint::ModelRc::new(slint::VecModel::from(files)));
             ui.set_show_file_browser(true);
-            ui.set_status_text("Browse for APK/XAPK files".into());
+            ui.set_status_text("Browse and tap 'Open' or 'Install'".into());
         }
     });
 
-    // Navigate directory in file browser
+    // --- Navigate directory ---
     let ui_weak = ui.as_weak();
+    let file_entries_clone = file_entries.clone();
     ui.on_navigate_dir(move |dir_path| {
         if let Some(ui) = ui_weak.upgrade() {
             let path_str = dir_path.to_string();
             let new_path = if path_str == ".." {
-                // Go up one level
                 let current = ui.get_current_path().to_string();
                 Path::new(&current)
                     .parent()
@@ -141,52 +151,99 @@ fn android_main(app: android_activity::AndroidApp) {
             info!("Navigating to: {}", new_path);
             ui.set_current_path(new_path.clone().into());
             let files = scan_directory(&new_path);
+            
+            if let Ok(mut fe) = file_entries_clone.lock() {
+                *fe = files.clone();
+            }
+            
             ui.set_file_list(slint::ModelRc::new(slint::VecModel::from(files)));
         }
     });
 
-    // Select file from browser — install it
-    let installer_clone = installer.clone();
+    // --- File tap by index (reliable touch) ---
     let ui_weak = ui.as_weak();
-    ui.on_select_file(move |file_path| {
-        let path = file_path.to_string();
-        info!("Selected file for install: {}", path);
+    let file_entries_clone = file_entries.clone();
+    let installer_clone = installer.clone();
+    ui.on_file_tap(move |index| {
+        let entry = {
+            let fe = file_entries_clone.lock().unwrap();
+            fe.iter().find(|f| f.index == index).cloned()
+        };
 
-        if let Some(ui) = ui_weak.upgrade() {
-            ui.set_show_file_browser(false);
-            ui.set_importing(true);
-            ui.set_status_text(format!("Installing {}...", 
-                Path::new(&path).file_name()
-                    .map(|n| n.to_string_lossy().to_string())
-                    .unwrap_or_else(|| path.clone())
-            ).into());
+        if let Some(file) = entry {
+            let path = file.path.to_string();
+            if file.is_dir {
+                // Navigate into directory
+                if let Some(ui) = ui_weak.upgrade() {
+                    info!("Opening folder: {}", path);
+                    ui.set_current_path(path.clone().into());
+                    let files = scan_directory(&path);
+                    if let Ok(mut fe) = file_entries_clone.lock() {
+                        *fe = files.clone();
+                    }
+                    ui.set_file_list(slint::ModelRc::new(slint::VecModel::from(files)));
+                }
+            } else {
+                // Install the file
+                if let Some(ui) = ui_weak.upgrade() {
+                    let filename = Path::new(&path)
+                        .file_name()
+                        .map(|n| n.to_string_lossy().to_string())
+                        .unwrap_or_else(|| path.clone());
+                    
+                    info!("Installing: {}", path);
+                    ui.set_show_file_browser(false);
+                    ui.set_importing(true);
+                    ui.set_status_text(format!("Installing {}...", filename).into());
 
-            // Perform installation
-            let source = ImportSource::FilePath(path.clone());
-            match installer_clone.lock() {
-                Ok(mut inst) => {
-                    match inst.install(source, true) {
-                        Ok(app) => {
-                            ui.set_status_text(
-                                format!("Installed: {} ({})", app.label, app.package_name).into()
-                            );
-                            info!("Successfully installed: {}", app.package_name);
+                    let source = ImportSource::FilePath(path.clone());
+                    match installer_clone.lock() {
+                        Ok(mut inst) => {
+                            match inst.install(source, true) {
+                                Ok(app) => {
+                                    ui.set_status_text(
+                                        format!("Installed: {}", app.label).into()
+                                    );
+                                    info!("Installed: {} ({})", app.label, app.package_name);
+                                }
+                                Err(e) => {
+                                    ui.set_status_text(
+                                        format!("Failed: {}", e).into()
+                                    );
+                                    info!("Install failed: {}", e);
+                                }
+                            }
                         }
                         Err(e) => {
-                            ui.set_status_text(format!("Install failed: {}", e).into());
-                            info!("Install failed: {}", e);
+                            ui.set_status_text(format!("Error: {}", e).into());
                         }
                     }
-                }
-                Err(e) => {
-                    ui.set_status_text(format!("Error: {}", e).into());
+                    ui.set_importing(false);
                 }
             }
-            ui.set_importing(false);
         }
     });
 
-    // Close file browser
+    // --- Select file (legacy, kept for compatibility) ---
+    let ui_weak = ui.as_weak();
+    let installer_clone2 = installer.clone();
+    ui.on_select_file(move |file_path| {
+        let path = file_path.to_string();
+        info!("Direct select: {}", path);
+        if let Some(ui) = ui_weak.upgrade() {
+            ui.set_show_file_browser(false);
+            ui.set_status_text(format!("Installing...").into());
+            let source = ImportSource::FilePath(path);
+            if let Ok(mut inst) = installer_clone2.lock() {
+                match inst.install(source, true) {
+                    Ok(app) => ui.set_status_text(format!("Installed: {}", app.label).into()),
+                    Err(e) => ui.set_status_text(format!("Failed: {}", e).into()),
+                }
+            }
+        }
+    });
+
+    // --- Close browser ---
     let ui_weak = ui.as_weak();
     ui.on_close_browser(move || {
         if let Some(ui) = ui_weak.upgrade() {
@@ -195,47 +252,46 @@ fn android_main(app: android_activity::AndroidApp) {
         }
     });
 
-    // Launch app callback
+    // --- Launch app ---
     let _launcher_ref = launcher.clone();
     let ui_weak = ui.as_weak();
     ui.on_launch_app(move |app_id| {
-        info!("Launch app requested: id={}", app_id);
+        info!("Launch app: id={}", app_id);
         if let Some(ui) = ui_weak.upgrade() {
             ui.set_status_text(format!("Launching app #{}...", app_id).into());
         }
     });
 
-    // Stop app callback
+    // --- Stop app ---
     let _launcher_ref2 = launcher.clone();
     let ui_weak = ui.as_weak();
     ui.on_stop_app(move |app_id| {
-        info!("Stop app requested: id={}", app_id);
+        info!("Stop app: id={}", app_id);
         if let Some(ui) = ui_weak.upgrade() {
-            ui.set_status_text(format!("Stopping app #{}...", app_id).into());
+            ui.set_status_text(format!("Stopped app #{}", app_id).into());
         }
     });
 
-    // Uninstall app callback
+    // --- Uninstall ---
     let ui_weak = ui.as_weak();
     ui.on_uninstall_app(move |app_id| {
-        info!("Uninstall app requested: id={}", app_id);
+        info!("Uninstall: id={}", app_id);
         if let Some(ui) = ui_weak.upgrade() {
             ui.set_status_text(format!("Uninstalled app #{}", app_id).into());
         }
     });
 
-    // Toggle GameGuardian compat callback
+    // --- Toggle GG ---
     let ui_weak = ui.as_weak();
     ui.on_toggle_gg(move |app_id| {
-        info!("Toggle GG compat for app: id={}", app_id);
+        info!("Toggle GG: id={}", app_id);
         if let Some(ui) = ui_weak.upgrade() {
-            ui.set_status_text(format!("Toggled GG compat for app #{}", app_id).into());
+            ui.set_status_text(format!("Toggled GG for app #{}", app_id).into());
         }
     });
 
-    // Run the Slint event loop (this blocks until the app is closed)
-    info!("Starting Slint UI event loop...");
+    // Run the UI event loop
+    info!("Starting UI...");
     ui.run().unwrap();
-
     info!("App exiting");
 }

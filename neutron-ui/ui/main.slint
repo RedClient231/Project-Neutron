@@ -1,7 +1,8 @@
 // Neutron Space — Main UI
 // Pure declarative UI in Slint (no Java/Kotlin)
+// Optimized for Android touch input
 
-import { Button, ListView, VerticalBox, HorizontalBox, LineEdit, ScrollView } from "std-widgets.slint";
+import { Button, ListView, VerticalBox, HorizontalBox, ScrollView } from "std-widgets.slint";
 
 export struct AppEntry {
     id: int,
@@ -14,6 +15,7 @@ export struct AppEntry {
 }
 
 export struct FileEntry {
+    index: int,
     name: string,
     path: string,
     size-mb: string,
@@ -41,6 +43,7 @@ export component NeutronApp inherits Window {
     callback select-file(string);
     callback navigate-dir(string);
     callback close-browser();
+    callback file-tap(int);
 
     VerticalBox {
         padding: 16px;
@@ -89,18 +92,39 @@ export component NeutronApp inherits Window {
             HorizontalBox {
                 spacing: 8px;
                 Button {
-                    text: importing ? "Importing..." : "Import APK/XAPK";
+                    text: importing ? "Importing..." : "Import APK / XAPK";
                     enabled: !importing;
                     clicked => { root.import-apk(); }
                 }
             }
 
-            // App list
+            // App list header
             Text {
                 text: "Installed Apps (" + installed-apps.length + ")";
                 font-size: 14px;
                 font-weight: 600;
                 color: #ccc;
+            }
+
+            if installed-apps.length == 0: Rectangle {
+                height: 120px;
+                border-radius: 8px;
+                background: #16213e;
+                VerticalBox {
+                    padding: 20px;
+                    Text {
+                        text: "No apps installed yet";
+                        font-size: 14px;
+                        color: #666;
+                        horizontal-alignment: center;
+                    }
+                    Text {
+                        text: "Tap 'Import APK / XAPK' to add apps";
+                        font-size: 12px;
+                        color: #555;
+                        horizontal-alignment: center;
+                    }
+                }
             }
 
             ListView {
@@ -193,7 +217,7 @@ export component NeutronApp inherits Window {
             }
         }
 
-        // File browser view
+        // File browser view — uses Buttons instead of TouchArea for reliable tap
         if root.show-file-browser: VerticalBox {
             spacing: 8px;
 
@@ -201,7 +225,7 @@ export component NeutronApp inherits Window {
             HorizontalBox {
                 spacing: 8px;
                 Text {
-                    text: "Select APK/XAPK";
+                    text: "Select APK / XAPK";
                     font-size: 16px;
                     font-weight: 600;
                     color: white;
@@ -214,7 +238,7 @@ export component NeutronApp inherits Window {
                 }
             }
 
-            // Current path
+            // Current path display
             Rectangle {
                 height: 28px;
                 border-radius: 4px;
@@ -232,71 +256,39 @@ export component NeutronApp inherits Window {
                 }
             }
 
-            // Navigate up button
-            Rectangle {
-                height: 44px;
-                border-radius: 6px;
-                background: #1f2937;
-                TouchArea {
-                    clicked => { root.navigate-dir(".."); }
-                }
-                HorizontalBox {
-                    padding-left: 12px;
-                    spacing: 8px;
-                    Text {
-                        text: "..";
-                        font-size: 18px;
-                        font-weight: 700;
-                        color: #60a5fa;
-                        vertical-alignment: center;
-                    }
-                    Text {
-                        text: "Go up";
-                        font-size: 13px;
-                        color: #9ca3af;
-                        vertical-alignment: center;
-                    }
-                }
+            // Go up button (always visible)
+            Button {
+                text: "⬆  Go Up (..)";
+                clicked => { root.navigate-dir(".."); }
             }
 
-            // File list
+            // File list — using ListView with Button-based items for reliable touch
             ListView {
                 for file in root.file-list: Rectangle {
-                    height: 52px;
+                    height: 56px;
                     border-radius: 6px;
                     background: file.is-dir ? #1f2937 : #16213e;
-                    
-                    TouchArea {
-                        clicked => {
-                            if file.is-dir {
-                                root.navigate-dir(file.path);
-                            } else {
-                                root.select-file(file.path);
-                            }
-                        }
-                    }
 
                     HorizontalBox {
-                        padding: 12px;
-                        spacing: 10px;
+                        padding-left: 8px;
+                        padding-right: 8px;
+                        spacing: 8px;
 
-                        // Icon
+                        // Icon indicator
                         Rectangle {
-                            width: 32px;
-                            height: 32px;
+                            width: 36px;
+                            height: 36px;
                             border-radius: 6px;
                             background: file.is-dir ? #3b82f6 : #10b981;
                             Text {
-                                text: file.is-dir ? "D" : "A";
-                                font-size: 14px;
-                                font-weight: 700;
-                                color: white;
+                                text: file.is-dir ? "📁" : "📦";
+                                font-size: 16px;
                                 horizontal-alignment: center;
                                 vertical-alignment: center;
                             }
                         }
 
-                        // File info
+                        // Name + size
                         VerticalBox {
                             spacing: 2px;
                             Text {
@@ -304,12 +296,21 @@ export component NeutronApp inherits Window {
                                 font-size: 13px;
                                 color: white;
                                 overflow: elide;
+                                vertical-alignment: center;
                             }
                             Text {
                                 text: file.is-dir ? "Folder" : file.size-mb + " MB";
                                 font-size: 11px;
-                                color: #666;
+                                color: #9ca3af;
                             }
+                        }
+
+                        Rectangle { }
+
+                        // Tap button — this ensures reliable touch response
+                        Button {
+                            text: file.is-dir ? "Open" : "Install";
+                            clicked => { root.file-tap(file.index); }
                         }
                     }
                 }
