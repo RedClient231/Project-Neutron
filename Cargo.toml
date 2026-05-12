@@ -39,7 +39,7 @@ memmap2 = "0.9"
 walkdir = "2"
 
 # UI
-slint = { version = "1.9", default-features = false, features = ["std", "compat-1-2"] }
+slint = { version = "1.9", default-features = false, features = ["std", "compat-1-2", "backend-android-activity-06", "renderer-skia"] }
 
 # Crypto
 sha2 = "0.10"

@@ -78,12 +78,14 @@ jobs:
         run: |
           export PATH="$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin:$PATH"
           export ANDROID_NDK_ROOT="$ANDROID_NDK_HOME"
+          export ANDROID_JAR="$ANDROID_HOME/platforms/${{ env.ANDROID_PLATFORM }}/android.jar"
           cargo ndk -t arm64-v8a --platform 33 build --release -p neutron-app
 
       - name: Build ARM32 (armv7)
         run: |
           export PATH="$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin:$PATH"
           export ANDROID_NDK_ROOT="$ANDROID_NDK_HOME"
+          export ANDROID_JAR="$ANDROID_HOME/platforms/${{ env.ANDROID_PLATFORM }}/android.jar"
           cargo ndk -t armeabi-v7a --platform 33 build --release -p neutron-app
 
       - name: Assemble ARM64 native library

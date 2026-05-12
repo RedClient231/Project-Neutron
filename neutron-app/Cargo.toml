@@ -17,6 +17,10 @@ android_logger = "0.14"
 log.workspace = true
 anyhow.workspace = true
 tokio.workspace = true
+slint.workspace = true
+
+[build-dependencies]
+slint-build = "1.9"
 
 [lib]
 name = "neutron_app"
