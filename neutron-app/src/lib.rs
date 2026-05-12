@@ -40,6 +40,7 @@ struct FileBrowserEntry {
     name: String,
     path: String,
     is_dir: bool,
+    is_installable: bool,
     size_mb: f64,
 }
 
@@ -100,19 +101,23 @@ impl NeutronSpaceApp {
                             name,
                             path: full_path,
                             is_dir: true,
+                            is_installable: false,
                             size_mb: 0.0,
                         });
                     } else {
+                        // Show ALL files — mark APK/XAPK as installable
                         let lower = name.to_lowercase();
-                        if lower.ends_with(".apk") || lower.ends_with(".xapk") || lower.ends_with(".apks") {
-                            let size = entry.metadata().map(|m| m.len() as f64 / (1024.0 * 1024.0)).unwrap_or(0.0);
-                            self.files.push(FileBrowserEntry {
-                                name,
-                                path: full_path,
-                                is_dir: false,
-                                size_mb: size,
-                            });
-                        }
+                        let is_installable = lower.ends_with(".apk")
+                            || lower.ends_with(".xapk")
+                            || lower.ends_with(".apks");
+                        let size = entry.metadata().map(|m| m.len() as f64 / (1024.0 * 1024.0)).unwrap_or(0.0);
+                        self.files.push(FileBrowserEntry {
+                            name,
+                            path: full_path,
+                            is_dir: false,
+                            is_installable,
+                            size_mb: size,
+                        });
                     }
                 }
 
@@ -363,12 +368,14 @@ impl NeutronSpaceApp {
                             // Icon
                             let icon_color = if file.is_dir {
                                 egui::Color32::from_rgb(59, 130, 246)
-                            } else {
+                            } else if file.is_installable {
                                 egui::Color32::from_rgb(16, 185, 129)
+                            } else {
+                                egui::Color32::from_rgb(100, 100, 100)
                             };
                             let (rect, _) = ui.allocate_exact_size(egui::vec2(32.0, 32.0), egui::Sense::hover());
                             ui.painter().rect_filled(rect, 6.0, icon_color);
-                            let icon_text = if file.is_dir { "📁" } else { "📦" };
+                            let icon_text = if file.is_dir { "📁" } else if file.is_installable { "📦" } else { "📄" };
                             ui.painter().text(rect.center(), egui::Align2::CENTER_CENTER, icon_text, egui::FontId::proportional(14.0), egui::Color32::WHITE);
 
                             // Name + info
@@ -382,10 +389,16 @@ impl NeutronSpaceApp {
                             });
 
                             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                                let btn_text = if file.is_dir { "Open" } else { "Install" };
-                                if ui.button(btn_text).clicked() {
-                                    action = Some((file.is_dir, file.path.clone()));
+                                if file.is_dir {
+                                    if ui.button("Open").clicked() {
+                                        action = Some((true, file.path.clone()));
+                                    }
+                                } else if file.is_installable {
+                                    if ui.button("Install").clicked() {
+                                        action = Some((false, file.path.clone()));
+                                    }
                                 }
+                                // Non-installable files have no button — they're just visible
                             });
                         });
                     });
