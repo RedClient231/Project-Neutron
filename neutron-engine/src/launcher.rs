@@ -7,7 +7,6 @@ use neutron_core::{NeutronConfig, NeutronError, NeutronResult, ProcessState, Vir
 use log::{debug, error, info, warn};
 use std::collections::HashMap;
 use std::process::Command;
-use std::sync::Mutex;
 
 /// Represents a virtual space backed by an Android secondary user.
 #[derive(Debug, Clone)]
@@ -41,8 +40,6 @@ pub struct AppLauncher {
     app_to_space: HashMap<String, u32>,
     /// Next user ID to allocate
     next_user_id: u32,
-    /// Mutex for thread safety
-    lock: Mutex<()>,
 }
 
 impl AppLauncher {
@@ -53,7 +50,6 @@ impl AppLauncher {
             virtual_spaces: Vec::new(),
             app_to_space: HashMap::new(),
             next_user_id: 10, // Android user IDs start at 0, 10+ are safe for secondary users
-            lock: Mutex::new(()),
         }
     }
 
@@ -64,8 +60,6 @@ impl AppLauncher {
     /// 2. Install the APK into that user's space
     /// 3. Launch the app using Activity Manager with --user flag
     pub fn launch(&mut self, app: VirtualApp) -> NeutronResult<u32> {
-        let _guard = self.lock.lock().map_err(|e| NeutronError::Process(e.to_string()))?;
-
         info!("Launching virtual app: {}", app.package_name);
 
         // Get or create virtual space for this app
@@ -127,7 +121,7 @@ impl AppLauncher {
         info!("Created virtual space: {} (user {})", space_name, user_id);
 
         // Store the virtual space
-        let space = VirtualSpace::new(user_id, &space_name);
+        let mut space = VirtualSpace::new(user_id, &space_name);
         space.is_active = true;
         self.virtual_spaces.push(space);
         self.app_to_space.insert(package_name.to_string(), user_id);
@@ -243,8 +237,6 @@ impl AppLauncher {
 
     /// Stop a running virtual app.
     pub fn stop(&mut self, package_name: &str) -> NeutronResult<()> {
-        let _guard = self.lock.lock().map_err(|e| NeutronError::Process(e.to_string()))?;
-
         if let Some(&user_id) = self.app_to_space.get(package_name) {
             let output = Command::new("am")
                 .args(&["force-stop", "--user", &user_id.to_string(), package_name])
@@ -266,8 +258,6 @@ impl AppLauncher {
 
     /// Stop all running virtual apps and cleanup users.
     pub fn stop_all(&mut self) -> NeutronResult<()> {
-        let _guard = self.lock.lock().map_err(|e| NeutronError::Process(e.to_string()))?;
-
         for package_name in self.app_to_space.keys() {
             if let Some(&user_id) = self.app_to_space.get(package_name) {
                 let _ = Command::new("am")
