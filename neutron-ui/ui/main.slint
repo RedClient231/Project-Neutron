@@ -307,10 +307,13 @@ export component NeutronApp inherits Window {
 
                         Rectangle { }
 
-                        // Tap button — this ensures reliable touch response
-                        Button {
+                        // Tap button — only show for real entries
+                        if file.path != "": Button {
                             text: file.is-dir ? "Open" : "Install";
                             clicked => { root.file-tap(file.index); }
+                        }
+                        if file.path == "": Rectangle {
+                            width: 1px;
                         }
                     }
                 }

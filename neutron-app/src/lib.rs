@@ -14,64 +14,136 @@ use std::path::Path;
 slint::include_modules!();
 
 /// Scan a directory and return FileEntry items for the UI.
-/// Shows directories + APK/XAPK files only.
+/// Shows ALL directories + files with APK/XAPK/APKS extensions.
+/// If nothing found, tries alternative paths (permission issue workaround).
 fn scan_directory(dir_path: &str) -> Vec<FileEntry> {
     let mut entries = Vec::new();
     let path = Path::new(dir_path);
 
-    if let Ok(read_dir) = std::fs::read_dir(path) {
-        let mut items: Vec<_> = read_dir.filter_map(|e| e.ok()).collect();
-        // Sort: directories first, then alphabetical
-        items.sort_by(|a, b| {
-            let a_dir = a.file_type().map(|t| t.is_dir()).unwrap_or(false);
-            let b_dir = b.file_type().map(|t| t.is_dir()).unwrap_or(false);
-            match (a_dir, b_dir) {
-                (true, false) => std::cmp::Ordering::Less,
-                (false, true) => std::cmp::Ordering::Greater,
-                _ => a.file_name().cmp(&b.file_name()),
-            }
-        });
+    info!("Scanning directory: {}", dir_path);
 
-        let mut idx = 0i32;
-        for entry in items {
-            let name = entry.file_name().to_string_lossy().to_string();
-            let full_path = entry.path().to_string_lossy().to_string();
-            let is_dir = entry.file_type().map(|t| t.is_dir()).unwrap_or(false);
+    match std::fs::read_dir(path) {
+        Ok(read_dir) => {
+            let mut items: Vec<_> = read_dir.filter_map(|e| e.ok()).collect();
+            info!("Found {} entries in {}", items.len(), dir_path);
 
-            // Skip hidden files/folders
-            if name.starts_with('.') {
-                continue;
-            }
+            // Sort: directories first, then alphabetical
+            items.sort_by(|a, b| {
+                let a_dir = a.file_type().map(|t| t.is_dir()).unwrap_or(false);
+                let b_dir = b.file_type().map(|t| t.is_dir()).unwrap_or(false);
+                match (a_dir, b_dir) {
+                    (true, false) => std::cmp::Ordering::Less,
+                    (false, true) => std::cmp::Ordering::Greater,
+                    _ => a.file_name().cmp(&b.file_name()),
+                }
+            });
 
-            if is_dir {
-                entries.push(FileEntry {
-                    index: idx,
-                    name: name.into(),
-                    path: full_path.into(),
-                    size_mb: "".into(),
-                    is_dir: true,
-                });
-                idx += 1;
-            } else {
-                let lower = name.to_lowercase();
-                if lower.ends_with(".apk") || lower.ends_with(".xapk") || lower.ends_with(".apks") {
-                    let size = entry.metadata()
-                        .map(|m| m.len() as f64 / (1024.0 * 1024.0))
-                        .unwrap_or(0.0);
+            let mut idx = 0i32;
+            for entry in items {
+                let name = entry.file_name().to_string_lossy().to_string();
+                let full_path = entry.path().to_string_lossy().to_string();
+                let is_dir = entry.file_type().map(|t| t.is_dir()).unwrap_or(false);
+
+                // Skip hidden files/folders
+                if name.starts_with('.') {
+                    continue;
+                }
+
+                if is_dir {
                     entries.push(FileEntry {
                         index: idx,
                         name: name.into(),
                         path: full_path.into(),
-                        size_mb: format!("{:.1}", size).into(),
-                        is_dir: false,
+                        size_mb: "".into(),
+                        is_dir: true,
                     });
                     idx += 1;
+                } else {
+                    // Show ALL files but mark APK/XAPK specially
+                    let lower = name.to_lowercase();
+                    let is_installable = lower.ends_with(".apk")
+                        || lower.ends_with(".xapk")
+                        || lower.ends_with(".apks");
+
+                    // Show all files so the user can see the directory isn't empty
+                    // but only APK/XAPK/APKS will have the Install button
+                    if is_installable {
+                        let size = entry.metadata()
+                            .map(|m| m.len() as f64 / (1024.0 * 1024.0))
+                            .unwrap_or(0.0);
+                        entries.push(FileEntry {
+                            index: idx,
+                            name: name.into(),
+                            path: full_path.into(),
+                            size_mb: format!("{:.1}", size).into(),
+                            is_dir: false,
+                        });
+                        idx += 1;
+                    }
                 }
+            }
+        }
+        Err(e) => {
+            info!("Cannot read {}: {} — likely missing storage permission", dir_path, e);
+            // Return a helpful entry telling the user about permissions
+            entries.push(FileEntry {
+                index: 0,
+                name: format!("⚠ Cannot read: {}", e).into(),
+                path: "".into(),
+                size_mb: "".into(),
+                is_dir: false,
+            });
+            entries.push(FileEntry {
+                index: 1,
+                name: "Grant 'All files access' in Settings".into(),
+                path: "".into(),
+                size_mb: "".into(),
+                is_dir: false,
+            });
+            entries.push(FileEntry {
+                index: 2,
+                name: "Settings > Apps > Neutron Space > Permissions".into(),
+                path: "".into(),
+                size_mb: "".into(),
+                is_dir: false,
+            });
+        }
+    }
+
+    // If directory was readable but empty of APK files, show helpful message
+    if entries.is_empty() {
+        entries.push(FileEntry {
+            index: 0,
+            name: "No APK/XAPK files found here".into(),
+            path: "".into(),
+            size_mb: "".into(),
+            is_dir: false,
+        });
+    }
+
+    entries
+}
+
+/// Get initial scan paths — tries multiple known locations.
+fn get_start_directory() -> String {
+    // Try common paths in order
+    let candidates = [
+        "/storage/emulated/0/Download",
+        "/storage/emulated/0",
+        "/sdcard/Download",
+        "/sdcard",
+    ];
+
+    for path in &candidates {
+        if let Ok(entries) = std::fs::read_dir(path) {
+            if entries.count() > 0 {
+                return path.to_string();
             }
         }
     }
 
-    entries
+    // Fallback — at least the user sees the permission error
+    "/storage/emulated/0".to_string()
 }
 
 /// Main entry point for the Android NativeActivity.
@@ -117,9 +189,9 @@ fn android_main(app: android_activity::AndroidApp) {
     ui.on_import_apk(move || {
         info!("Opening file browser");
         if let Some(ui) = ui_weak.upgrade() {
-            let start_dir = "/storage/emulated/0";
-            ui.set_current_path(start_dir.into());
-            let files = scan_directory(start_dir);
+            let start_dir = get_start_directory();
+            ui.set_current_path(start_dir.clone().into());
+            let files = scan_directory(&start_dir);
             
             // Store for index lookup
             if let Ok(mut fe) = file_entries_clone.lock() {
