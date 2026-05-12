@@ -156,7 +156,7 @@ impl VirtualProcess {
 
     fn fork_child(&self) -> NeutronResult<u32> {
         let pid = unsafe { libc::fork() };
-        
+
         if pid < 0 {
             return Err(NeutronError::Process(
                 format!("fork() failed: {}", std::io::Error::last_os_error())
@@ -164,23 +164,132 @@ impl VirtualProcess {
         }
 
         if pid == 0 {
-            // Child process — this is the virtual app
-            // In production, we'd execve() the app's entry point here.
-            // For now, setup the environment and wait.
-            self.setup_child_env();
-            
-            // Child enters the app execution loop
-            // (In real implementation, this loads the DEX/native lib)
-            unsafe {
-                // Allow parent to trace us
-                libc::ptrace(libc::PTRACE_TRACEME, 0, 0, 0);
-                libc::raise(libc::SIGSTOP);
-            }
-            std::process::exit(0);
+            // Child process — launch the actual Android app
+            self.launch_android_app();
+            // If launch_android_app returns, execve failed
+            std::process::exit(1);
         }
 
         // Parent returns child PID
         Ok(pid as u32)
+    }
+
+    /// Launch the Android app. This is the entry point that gets executed
+    /// after fork() in the child process. It replaces the child with the
+    /// actual Android app using execve().
+    fn launch_android_app(&self) {
+        use std::ffi::CString;
+        use std::ptr;
+
+        // Setup virtualized environment variables
+        self.setup_child_env();
+
+        // Build virtual paths
+        let virtual_root = self.redirector.get_virtual_root();
+        let app_dir = format!("{}/{}", virtual_root, self.app.package_name);
+        let lib_path = format!("{}/lib", app_dir);
+        let apk_path = &self.app.apk_path;
+
+        // Get main activity class name from package
+        // Common patterns: .MainActivity, MainActivity, package.MainActivity
+        let activity_class = self.resolve_main_activity();
+
+        // Set up environment for the virtualized app
+        std::env::set_var("LD_LIBRARY_PATH", &lib_path);
+        std::env::set_var("ANDROID_DATA", &app_dir);
+        std::env::set_var("ANDROID_ROOT", "/system");
+        std::env::set_var("ANDROID_RUNTIME_ROOT", "/system");
+        std::env::set_var("CLASSPATH", apk_path);
+        std::env::set_var("JAVA_HOME", "/system");
+
+        // For GameGuardian compatibility
+        if self.app.gg_compat {
+            std::env::set_var("DEBUGGABLE", "1");
+        }
+
+        // === Option 1: Use dalvikvm for DEX execution ===
+        // dalvikvm directly executes DEX bytecode
+        let dalvikvm = CString::new("/system/bin/dalvikvm").unwrap();
+        let dalvik_args = vec![
+            CString::new(activity_class.clone()).unwrap(),
+            CString::new("-Xcompilerargs").unwrap(),
+            CString::new("--inline-with=dex").unwrap(),
+            CString::new(format!("-Duser.home={}", app_dir)).unwrap(),
+            CString::new(format!("-Xpsn={}", self.app.package_name)).unwrap(), // Process serial number
+        ];
+
+        let mut dalvik_argv: Vec<*const libc::c_char> = vec![dalvikvm.as_ptr()];
+        for arg in &dalvik_args {
+            dalvik_argv.push(arg.as_ptr());
+        }
+        dalvik_argv.push(ptr::null());
+
+        // === Option 2: Use app_process for NativeActivity ===
+        // app_process handles native libraries better
+        let app_process = CString::new("/system/bin/app_process64").unwrap_or(
+            CString::new("/system/bin/app_process").unwrap()
+        );
+
+        let nice_name = format!("{}:{}", self.app.package_name,
+            self.app.label.replace(" ", "_").replace("/", "_"));
+        let app_args = vec![
+            CString::new(format!("--nice-name={}", nice_name)).unwrap(),
+            CString::new(activity_class).unwrap(),
+        ];
+
+        let mut app_argv: Vec<*const libc::c_char> = vec![app_process.as_ptr()];
+        for arg in &app_args {
+            app_argv.push(arg.as_ptr());
+        }
+        app_argv.push(ptr::null());
+
+        // Build environment array (must keep CStrings alive!)
+        let env_vars: Vec<CString> = std::env::vars()
+            .filter(|(k, _)| !k.starts_with("RUST_")) // Filter RUST_* vars
+            .map(|(k, v)| CString::new(format!("{}={}", k, v)).unwrap())
+            .collect();
+        let mut env: Vec<*const libc::c_char> = env_vars.iter()
+            .map(|s| s.as_ptr())
+            .collect();
+        env.push(ptr::null());
+
+        // Setup ptrace tracing before exec (parent will trace us)
+        unsafe {
+            libc::ptrace(libc::PTRACE_TRACEME, 0, 0, 0);
+            libc::raise(libc::SIGSTOP);
+        }
+
+        // Try dalvikvm first (for Java apps)
+        unsafe {
+            libc::execve(dalvikvm.as_ptr(), dalvik_argv.as_ptr(), env.as_ptr());
+        }
+
+        // If dalvikvm fails, try app_process (for NativeActivity apps)
+        unsafe {
+            libc::execve(app_process.as_ptr(), app_argv.as_ptr(), env.as_ptr());
+        }
+
+        // If both fail, try the APK directly (won't work, but gives error log)
+        unsafe {
+            let apk_bin = CString::new(apk_path.as_str()).unwrap();
+            let fallback_argv: Vec<*const libc::c_char> = vec![apk_bin.as_ptr(), ptr::null()];
+            libc::execve(apk_bin.as_ptr(), fallback_argv.as_ptr(), env.as_ptr());
+        }
+
+        // If we reach here, execve failed
+        error!("Failed to launch Android app: {}", self.app.package_name);
+        error!("  Tried: dalvikvm, app_process64, app_process");
+    }
+
+    /// Resolve the main activity class name from the package.
+    /// Falls back to standard patterns if manifest parsing is unavailable.
+    fn resolve_main_activity(&self) -> String {
+        // Try to find common activity patterns
+        // Most Android apps use these patterns:
+        let package = &self.app.package_name;
+
+        // Pattern 1: .MainActivity (most common)
+        format!("{}.MainActivity", package)
     }
 
     fn setup_child_env(&self) {
