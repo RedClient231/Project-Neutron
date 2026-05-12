@@ -1,0 +1,187 @@
+// Neutron Space — Main UI
+// Pure declarative UI in Slint (no Java/Kotlin)
+
+import { Button, ListView, VerticalBox, HorizontalBox, LineEdit, GridBox } from "std-widgets.slint";
+
+export struct AppEntry {
+    id: int,
+    name: string,
+    package-name: string,
+    version: string,
+    size-mb: string,
+    is-running: bool,
+    gg-compat: bool,
+}
+
+export component NeutronApp inherits Window {
+    title: "Neutron Space";
+    preferred-width: 400px;
+    preferred-height: 720px;
+    background: #1a1a2e;
+
+    in-out property <[AppEntry]> installed-apps: [];
+    in-out property <string> status-text: "Ready";
+    in-out property <bool> importing: false;
+
+    callback import-apk();
+    callback launch-app(int);
+    callback stop-app(int);
+    callback uninstall-app(int);
+    callback toggle-gg(int);
+
+    VerticalBox {
+        padding: 16px;
+        spacing: 12px;
+
+        // Header
+        HorizontalBox {
+            spacing: 8px;
+            Text {
+                text: "Neutron Space";
+                font-size: 24px;
+                font-weight: 700;
+                color: #e94560;
+                vertical-alignment: center;
+            }
+            Rectangle { }
+            Text {
+                text: "v1.0";
+                font-size: 12px;
+                color: #666;
+                vertical-alignment: center;
+            }
+        }
+
+        // Status bar
+        Rectangle {
+            height: 32px;
+            border-radius: 6px;
+            background: #16213e;
+            HorizontalBox {
+                padding-left: 12px;
+                padding-right: 12px;
+                Text {
+                    text: root.status-text;
+                    font-size: 12px;
+                    color: #aaa;
+                    vertical-alignment: center;
+                }
+            }
+        }
+
+        // Action buttons
+        HorizontalBox {
+            spacing: 8px;
+            Button {
+                text: importing ? "Importing..." : "Import APK/XAPK";
+                enabled: !importing;
+                clicked => { root.import-apk(); }
+            }
+        }
+
+        // App list
+        Text {
+            text: "Installed Apps (" + installed-apps.length + ")";
+            font-size: 14px;
+            font-weight: 600;
+            color: #ccc;
+        }
+
+        ListView {
+            for app in root.installed-apps: Rectangle {
+                height: 80px;
+                border-radius: 8px;
+                background: #16213e;
+
+                HorizontalBox {
+                    padding: 12px;
+                    spacing: 12px;
+
+                    // App icon placeholder
+                    Rectangle {
+                        width: 48px;
+                        height: 48px;
+                        border-radius: 8px;
+                        background: #e94560;
+                        Text {
+                            text: app.name;
+                            font-size: 16px;
+                            color: white;
+                            horizontal-alignment: center;
+                            vertical-alignment: center;
+                            overflow: clip;
+                        }
+                    }
+
+                    // App info
+                    VerticalBox {
+                        spacing: 4px;
+                        Text {
+                            text: app.name;
+                            font-size: 14px;
+                            font-weight: 600;
+                            color: white;
+                        }
+                        Text {
+                            text: app.package-name;
+                            font-size: 11px;
+                            color: #888;
+                        }
+                        HorizontalBox {
+                            spacing: 8px;
+                            Text {
+                                text: "v" + app.version;
+                                font-size: 10px;
+                                color: #666;
+                            }
+                            Text {
+                                text: app.size-mb + " MB";
+                                font-size: 10px;
+                                color: #666;
+                            }
+                            Text {
+                                text: app.is-running ? "Running" : "Stopped";
+                                font-size: 10px;
+                                color: app.is-running ? #4caf50 : #666;
+                            }
+                            Text {
+                                text: app.gg-compat ? "GG" : "";
+                                font-size: 10px;
+                                color: #ff9800;
+                            }
+                        }
+                    }
+
+                    Rectangle { }
+
+                    // Action buttons
+                    VerticalBox {
+                        spacing: 4px;
+                        Button {
+                            text: app.is-running ? "Stop" : "Launch";
+                            clicked => {
+                                if app.is-running {
+                                    root.stop-app(app.id);
+                                } else {
+                                    root.launch-app(app.id);
+                                }
+                            }
+                        }
+                        Button {
+                            text: app.gg-compat ? "GG: ON" : "GG: OFF";
+                            clicked => { root.toggle-gg(app.id); }
+                        }
+                    }
+                }
+            }
+        }
+
+        // Footer
+        Text {
+            text: "Neutron Virtual Space — No Root Required";
+            font-size: 10px;
+            color: #444;
+            horizontal-alignment: center;
+        }
+    }
+}

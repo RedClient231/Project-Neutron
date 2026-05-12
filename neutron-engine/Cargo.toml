@@ -1,0 +1,18 @@
+[package]
+name = "neutron-engine"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[dependencies]
+neutron-core = { path = "../neutron-core" }
+neutron-vfs = { path = "../neutron-vfs" }
+libc.workspace = true
+log.workspace = true
+thiserror.workspace = true
+anyhow.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+bitflags.workspace = true
+memmap2.workspace = true

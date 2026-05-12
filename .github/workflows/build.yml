@@ -1,0 +1,219 @@
+name: Build Neutron Space APK
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+  ANDROID_NDK_VERSION: "26.1.10909125"
+  ANDROID_SDK_BUILD_TOOLS: "34.0.0"
+  ANDROID_PLATFORM: "android-33"
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android,armv7-linux-androideabi
+
+      - name: Cache Cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+        with:
+          accept-android-sdk-licenses: true
+
+      - name: Install Android NDK
+        run: |
+          sdkmanager "ndk;${{ env.ANDROID_NDK_VERSION }}"
+          sdkmanager "build-tools;${{ env.ANDROID_SDK_BUILD_TOOLS }}"
+          sdkmanager "platforms;${{ env.ANDROID_PLATFORM }}"
+          echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/${{ env.ANDROID_NDK_VERSION }}" >> $GITHUB_ENV
+          echo "NDK_HOME=$ANDROID_HOME/ndk/${{ env.ANDROID_NDK_VERSION }}" >> $GITHUB_ENV
+
+      - name: Install cargo-ndk
+        run: cargo install cargo-ndk
+
+      - name: Install xbuild (for APK packaging)
+        run: cargo install xbuild
+
+      - name: Configure NDK linkers
+        run: |
+          mkdir -p .cargo
+          cat > .cargo/config.toml << 'EOF'
+          [target.aarch64-linux-android]
+          linker = "aarch64-linux-android33-clang"
+          ar = "llvm-ar"
+
+          [target.armv7-linux-androideabi]
+          linker = "armv7a-linux-androideabi33-clang"
+          ar = "llvm-ar"
+          EOF
+
+          # Add NDK toolchain to PATH
+          export TOOLCHAIN="$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin"
+          echo "$TOOLCHAIN" >> $GITHUB_PATH
+
+      - name: Build ARM64 (aarch64)
+        run: |
+          export PATH="$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin:$PATH"
+          cargo ndk -t arm64-v8a -p 33 build --release -p neutron-app
+
+      - name: Build ARM32 (armv7)
+        run: |
+          export PATH="$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin:$PATH"
+          cargo ndk -t armeabi-v7a -p 33 build --release -p neutron-app
+
+      - name: Assemble ARM64 native library
+        run: |
+          export PATH="$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin:$PATH"
+          
+          # Assemble ARM64 trampolines
+          aarch64-linux-android33-clang -c asm/arm64/trampoline.s \
+            -o target/aarch64-linux-android/release/trampoline_arm64.o
+          
+          # Create static library
+          llvm-ar rcs target/aarch64-linux-android/release/libneutron_asm.a \
+            target/aarch64-linux-android/release/trampoline_arm64.o
+
+      - name: Assemble ARM32 native library
+        run: |
+          export PATH="$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin:$PATH"
+          
+          # Assemble ARM32 trampolines
+          armv7a-linux-androideabi33-clang -c asm/arm32/trampoline.s \
+            -o target/armv7-linux-androideabi/release/trampoline_arm32.o
+          
+          # Create static library
+          llvm-ar rcs target/armv7-linux-androideabi/release/libneutron_asm.a \
+            target/armv7-linux-androideabi/release/trampoline_arm32.o
+
+      - name: Package APK
+        run: |
+          export PATH="$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin:$PATH"
+          
+          # Create APK directory structure
+          mkdir -p apk_build/lib/arm64-v8a
+          mkdir -p apk_build/lib/armeabi-v7a
+          
+          # Copy native libraries
+          cp target/aarch64-linux-android/release/libneutron_app.so apk_build/lib/arm64-v8a/
+          cp target/armv7-linux-androideabi/release/libneutron_app.so apk_build/lib/armeabi-v7a/
+          
+          # Generate AndroidManifest.xml
+          cat > apk_build/AndroidManifest.xml << 'MANIFEST'
+          <?xml version="1.0" encoding="utf-8"?>
+          <manifest xmlns:android="http://schemas.android.com/apk/res/android"
+              package="com.neutron.virtualspace"
+              android:versionCode="1"
+              android:versionName="1.0.0">
+          
+              <uses-sdk android:minSdkVersion="33" android:targetSdkVersion="33" />
+          
+              <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" />
+              <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" />
+              <uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE" />
+              <uses-permission android:name="android.permission.INTERNET" />
+              <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES" />
+          
+              <application
+                  android:label="Neutron Space"
+                  android:hasCode="false"
+                  android:theme="@android:style/Theme.DeviceDefault.NoActionBar.Fullscreen">
+          
+                  <activity
+                      android:name="android.app.NativeActivity"
+                      android:label="Neutron Space"
+                      android:configChanges="orientation|keyboardHidden|screenSize"
+                      android:launchMode="singleTop"
+                      android:exported="true">
+          
+                      <meta-data
+                          android:name="android.app.lib_name"
+                          android:value="neutron_app" />
+          
+                      <intent-filter>
+                          <action android:name="android.intent.action.MAIN" />
+                          <category android:name="android.intent.category.LAUNCHER" />
+                      </intent-filter>
+                  </activity>
+              </application>
+          </manifest>
+          MANIFEST
+          
+          # Build APK using aapt2 + zipalign + apksigner
+          # If aapt2 not available, use manual zip approach
+          AAPT2="$ANDROID_HOME/build-tools/${{ env.ANDROID_SDK_BUILD_TOOLS }}/aapt2"
+          ZIPALIGN="$ANDROID_HOME/build-tools/${{ env.ANDROID_SDK_BUILD_TOOLS }}/zipalign"
+          APKSIGNER="$ANDROID_HOME/build-tools/${{ env.ANDROID_SDK_BUILD_TOOLS }}/apksigner"
+          
+          # Compile resources (minimal — no res/ needed for NativeActivity)
+          $AAPT2 link \
+            --manifest apk_build/AndroidManifest.xml \
+            -I "$ANDROID_HOME/platforms/${{ env.ANDROID_PLATFORM }}/android.jar" \
+            -o apk_build/neutron-unsigned-base.apk \
+            --min-sdk-version 33 \
+            --target-sdk-version 33 \
+            -v
+          
+          # Add native libraries to APK
+          cd apk_build
+          zip -r neutron-unsigned-base.apk lib/
+          cd ..
+          
+          # Align
+          $ZIPALIGN -f 4 apk_build/neutron-unsigned-base.apk apk_build/neutron-aligned.apk
+          
+          # Generate debug keystore
+          keytool -genkey -v \
+            -keystore apk_build/debug.keystore \
+            -alias neutron \
+            -keyalg RSA \
+            -keysize 2048 \
+            -validity 10000 \
+            -storepass neutron123 \
+            -keypass neutron123 \
+            -dname "CN=Neutron, OU=Dev, O=NeutronSpace, L=Dev, ST=Dev, C=US"
+          
+          # Sign
+          $APKSIGNER sign \
+            --ks apk_build/debug.keystore \
+            --ks-key-alias neutron \
+            --ks-pass pass:neutron123 \
+            --key-pass pass:neutron123 \
+            --out neutron-space.apk \
+            apk_build/neutron-aligned.apk
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: neutron-space-apk
+          path: neutron-space.apk
+          retention-days: 30
+
+      - name: Create Release (on tag)
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: neutron-space.apk
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

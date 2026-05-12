@@ -1,0 +1,65 @@
+[package]
+name = "neutron-app"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[dependencies]
+neutron-core = { path = "../neutron-core" }
+neutron-vfs = { path = "../neutron-vfs" }
+neutron-engine = { path = "../neutron-engine" }
+neutron-apk = { path = "../neutron-apk" }
+neutron-compat = { path = "../neutron-compat" }
+neutron-ui = { path = "../neutron-ui" }
+android-activity.workspace = true
+android_logger = "0.14"
+log.workspace = true
+anyhow.workspace = true
+tokio.workspace = true
+slint.workspace = true
+
+[lib]
+name = "neutron_app"
+crate-type = ["cdylib"]
+path = "src/lib.rs"
+
+[[package.metadata.android.uses_permission]]
+name = "android.permission.READ_EXTERNAL_STORAGE"
+
+[[package.metadata.android.uses_permission]]
+name = "android.permission.WRITE_EXTERNAL_STORAGE"
+
+[[package.metadata.android.uses_permission]]
+name = "android.permission.MANAGE_EXTERNAL_STORAGE"
+
+[[package.metadata.android.uses_permission]]
+name = "android.permission.INTERNET"
+
+[[package.metadata.android.uses_permission]]
+name = "android.permission.QUERY_ALL_PACKAGES"
+
+[package.metadata.android]
+package = "com.neutron.virtualspace"
+label = "Neutron Space"
+target_sdk_version = 33
+min_sdk_version = 33
+
+[package.metadata.android.application]
+label = "Neutron Space"
+has_code = false
+theme = "@android:style/Theme.DeviceDefault.NoActionBar.Fullscreen"
+
+[[package.metadata.android.application.activity]]
+name = "android.app.NativeActivity"
+label = "Neutron Space"
+config_changes = "orientation|keyboardHidden|screenSize"
+launch_mode = "singleTop"
+
+[[package.metadata.android.application.activity.intent_filter]]
+actions = ["android.intent.action.MAIN"]
+categories = ["android.intent.category.LAUNCHER"]
+
+[[package.metadata.android.application.activity.meta_data]]
+name = "android.app.lib_name"
+value = "neutron_app"

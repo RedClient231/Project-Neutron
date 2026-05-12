@@ -1,0 +1,19 @@
+[package]
+name = "neutron-ui"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[dependencies]
+neutron-core = { path = "../neutron-core" }
+neutron-apk = { path = "../neutron-apk" }
+neutron-engine = { path = "../neutron-engine" }
+slint.workspace = true
+log.workspace = true
+anyhow.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+
+[build-dependencies]
+slint-build = "1.9"
