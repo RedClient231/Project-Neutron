@@ -1,5 +1,4 @@
 fn main() {
-    // Slint UI compilation is handled in the neutron-app crate
-    // where the Android SDK environment is properly available.
+    // No build-time UI compilation needed — egui is immediate mode
     println!("cargo:rerun-if-changed=ui/main.slint");
 }
