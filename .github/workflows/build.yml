@@ -59,11 +59,11 @@ jobs:
           mkdir -p .cargo
           cat > .cargo/config.toml << 'EOF'
           [target.aarch64-linux-android]
-          linker = "aarch64-linux-android33-clang"
+          linker = "aarch64-linux-android24-clang"
           ar = "llvm-ar"
 
           [target.armv7-linux-androideabi]
-          linker = "armv7a-linux-androideabi33-clang"
+          linker = "armv7a-linux-androideabi24-clang"
           ar = "llvm-ar"
           EOF
 
@@ -75,13 +75,13 @@ jobs:
         run: |
           export PATH="$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin:$PATH"
           export ANDROID_NDK_ROOT="$ANDROID_NDK_HOME"
-          cargo ndk -t arm64-v8a --platform 33 build --release -p neutron-app
+          cargo ndk -t arm64-v8a --platform 24 build --release -p neutron-app
 
       - name: Build ARM32 (armv7)
         run: |
           export PATH="$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin:$PATH"
           export ANDROID_NDK_ROOT="$ANDROID_NDK_HOME"
-          cargo ndk -t armeabi-v7a --platform 33 build --release -p neutron-app
+          cargo ndk -t armeabi-v7a --platform 24 build --release -p neutron-app
 
       - name: Assemble ARM64 native library
         run: |
@@ -92,7 +92,7 @@ jobs:
           mkdir -p target/aarch64-linux-android/release
           
           # Assemble ARM64 trampolines
-          aarch64-linux-android33-clang -c asm/arm64/trampoline.s \
+          aarch64-linux-android24-clang -c asm/arm64/trampoline.s \
             -o target/aarch64-linux-android/release/trampoline_arm64.o
           
           # Create static library
@@ -108,7 +108,7 @@ jobs:
           mkdir -p target/armv7-linux-androideabi/release
           
           # Assemble ARM32 trampolines
-          armv7a-linux-androideabi33-clang -c asm/arm32/trampoline.s \
+          armv7a-linux-androideabi24-clang -c asm/arm32/trampoline.s \
             -o target/armv7-linux-androideabi/release/trampoline_arm32.o
           
           # Create static library
@@ -135,7 +135,7 @@ jobs:
               android:versionCode="1"
               android:versionName="1.0.0">
           
-              <uses-sdk android:minSdkVersion="33" android:targetSdkVersion="33" />
+              <uses-sdk android:minSdkVersion="24" android:targetSdkVersion="29" />
           
               <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" />
               <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" />
@@ -146,6 +146,7 @@ jobs:
               <application
                   android:label="Neutron Space"
                   android:hasCode="false"
+                  android:requestLegacyExternalStorage="true"
                   android:theme="@android:style/Theme.DeviceDefault.NoActionBar.Fullscreen">
           
                   <activity
@@ -179,8 +180,8 @@ jobs:
             --manifest apk_build/AndroidManifest.xml \
             -I "$ANDROID_HOME/platforms/${{ env.ANDROID_PLATFORM }}/android.jar" \
             -o apk_build/neutron-unsigned-base.apk \
-            --min-sdk-version 33 \
-            --target-sdk-version 33 \
+            --min-sdk-version 24 \
+            --target-sdk-version 29 \
             -v
           
           # Add native libraries to APK
