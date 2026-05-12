@@ -175,8 +175,11 @@ impl VirtualProcess {
     }
 
     /// Launch the Android app. This is the entry point that gets executed
-    /// after fork() in the child process. It replaces the child with the
-    /// actual Android app using execve().
+    /// after fork() in the child process.
+    ///
+    /// Uses Android's Activity Manager (`am`) to launch the app. This is how
+    /// ALL Android virtual space apps work (VMOS, Virtual Master, etc.) - they
+    /// use `am start` and let Activity Manager handle process spawning from Zygote.
     fn launch_android_app(&self) {
         use std::ffi::CString;
         use std::ptr;
@@ -187,65 +190,70 @@ impl VirtualProcess {
         // Build virtual paths
         let virtual_root = self.redirector.get_virtual_root();
         let app_dir = format!("{}/{}", virtual_root, self.app.package_name);
-        let lib_path = format!("{}/lib", app_dir);
-        let apk_path = &self.app.apk_path;
-
-        // Get main activity class name from package
-        // Common patterns: .MainActivity, MainActivity, package.MainActivity
-        let activity_class = self.resolve_main_activity();
 
         // Set up environment for the virtualized app
-        std::env::set_var("LD_LIBRARY_PATH", &lib_path);
         std::env::set_var("ANDROID_DATA", &app_dir);
         std::env::set_var("ANDROID_ROOT", "/system");
-        std::env::set_var("ANDROID_RUNTIME_ROOT", "/system");
-        std::env::set_var("CLASSPATH", apk_path);
-        std::env::set_var("JAVA_HOME", "/system");
 
         // For GameGuardian compatibility
         if self.app.gg_compat {
             std::env::set_var("DEBUGGABLE", "1");
         }
 
-        // === Option 1: Use dalvikvm for DEX execution ===
-        // dalvikvm directly executes DEX bytecode
-        let dalvikvm = CString::new("/system/bin/dalvikvm").unwrap();
-        let dalvik_args = vec![
-            CString::new(activity_class.clone()).unwrap(),
-            CString::new("-Xcompilerargs").unwrap(),
-            CString::new("--inline-with=dex").unwrap(),
-            CString::new(format!("-Duser.home={}", app_dir)).unwrap(),
-            CString::new(format!("-Xpsn={}", self.app.package_name)).unwrap(), // Process serial number
+        // === USE ACTIVITY MANAGER (am) - This is how real virtual spaces work ===
+        //
+        // The 'am' (Activity Manager) command is the standard Android way to launch apps.
+        // It handles:
+        // 1. Resolving the activity name from the package
+        // 2. Forking a new process from Zygote
+        // 3. Loading the APK
+        // 4. Starting the Dalvik/ART runtime with the correct Activity
+        //
+        // Command: am start -n package/activity -S -W --user 0 --taskAffinity ""
+        //
+        // Key flags:
+        //   -n <package>/<activity>  : Component to launch (activity auto-resolved by am)
+        //   -S                      : Force stop target app first
+        //   -W                      : Wait for launch to complete
+        //   --user 0               : Launch in user 0 (main Android user)
+        //   --taskAffinity ""      : Don't create new task (run in virtual space task)
+
+        // Resolve activity name - am can auto-resolve common patterns
+        // For most apps: package/.MainActivity works, or just package alone
+        let activity_spec = format!("{}/", self.app.package_name);
+
+        // Build 'am start' command
+        let am_bin = CString::new("/system/bin/am").unwrap();
+
+        let am_args = vec![
+            // arg[0]: program name
+            CString::new("am").unwrap(),
+            // arg[1]: subcommand
+            CString::new("start").unwrap(),
+            // arg[2]: -n <component>
+            CString::new(format!("-n {}", activity_spec)).unwrap(),
+            // arg[3]: -S (force stop first)
+            CString::new("-S").unwrap(),
+            // arg[4]: --user 0 (main user)
+            CString::new("--user").unwrap(),
+            CString::new("0").unwrap(),
+            // arg[5,6]: --taskAffinity "" (no new task)
+            CString::new("--taskAffinity").unwrap(),
+            CString::new("").unwrap(),
+            // arg[7,8]: -D (enable debug if GG compat)
+            CString::new("-D").unwrap(),
         ];
 
-        let mut dalvik_argv: Vec<*const libc::c_char> = vec![dalvikvm.as_ptr()];
-        for arg in &dalvik_args {
-            dalvik_argv.push(arg.as_ptr());
+        // Build argv: [/system/bin/am, start, -n package/, -S, --user, 0, ...]
+        let mut argv: Vec<*const libc::c_char> = vec![am_bin.as_ptr()];
+        for arg in &am_args {
+            argv.push(arg.as_ptr());
         }
-        dalvik_argv.push(ptr::null());
+        argv.push(ptr::null());
 
-        // === Option 2: Use app_process for NativeActivity ===
-        // app_process handles native libraries better
-        let app_process = CString::new("/system/bin/app_process64").unwrap_or(
-            CString::new("/system/bin/app_process").unwrap()
-        );
-
-        let nice_name = format!("{}:{}", self.app.package_name,
-            self.app.label.replace(" ", "_").replace("/", "_"));
-        let app_args = vec![
-            CString::new(format!("--nice-name={}", nice_name)).unwrap(),
-            CString::new(activity_class).unwrap(),
-        ];
-
-        let mut app_argv: Vec<*const libc::c_char> = vec![app_process.as_ptr()];
-        for arg in &app_args {
-            app_argv.push(arg.as_ptr());
-        }
-        app_argv.push(ptr::null());
-
-        // Build environment array (must keep CStrings alive!)
+        // Build environment array
         let env_vars: Vec<CString> = std::env::vars()
-            .filter(|(k, _)| !k.starts_with("RUST_")) // Filter RUST_* vars
+            .filter(|(k, _)| !k.starts_with("RUST_"))
             .map(|(k, v)| CString::new(format!("{}={}", k, v)).unwrap())
             .collect();
         let mut env: Vec<*const libc::c_char> = env_vars.iter()
@@ -253,43 +261,26 @@ impl VirtualProcess {
             .collect();
         env.push(ptr::null());
 
-        // Setup ptrace tracing before exec (parent will trace us)
+        // Signal we're traceable (for syscall interception if needed)
         unsafe {
             libc::ptrace(libc::PTRACE_TRACEME, 0, 0, 0);
             libc::raise(libc::SIGSTOP);
         }
 
-        // Try dalvikvm first (for Java apps)
+        // Execute am start - this replaces this process with Activity Manager
+        // am will internally fork and spawn the actual app
         unsafe {
-            libc::execve(dalvikvm.as_ptr(), dalvik_argv.as_ptr(), env.as_ptr());
+            libc::execve(am_bin.as_ptr(), argv.as_ptr(), env.as_ptr());
         }
 
-        // If dalvikvm fails, try app_process (for NativeActivity apps)
-        unsafe {
-            libc::execve(app_process.as_ptr(), app_argv.as_ptr(), env.as_ptr());
-        }
-
-        // If both fail, try the APK directly (won't work, but gives error log)
-        unsafe {
-            let apk_bin = CString::new(apk_path.as_str()).unwrap();
-            let fallback_argv: Vec<*const libc::c_char> = vec![apk_bin.as_ptr(), ptr::null()];
-            libc::execve(apk_bin.as_ptr(), fallback_argv.as_ptr(), env.as_ptr());
-        }
-
-        // If we reach here, execve failed
-        error!("Failed to launch Android app: {}", self.app.package_name);
-        error!("  Tried: dalvikvm, app_process64, app_process");
+        // If execve returns, it failed - log error
+        error!("Failed to execve am for: {}", self.app.package_name);
     }
 
     /// Resolve the main activity class name from the package.
-    /// Falls back to standard patterns if manifest parsing is unavailable.
+    /// With the 'am' approach, we don't need this anymore as am auto-resolves.
     fn resolve_main_activity(&self) -> String {
-        // Try to find common activity patterns
-        // Most Android apps use these patterns:
-        let package = &self.app.package_name;
-
-        // Pattern 1: .MainActivity (most common)
-        format!("{}.MainActivity", package)
+        format!("{}/", self.app.package_name)
     }
 
     fn setup_child_env(&self) {
