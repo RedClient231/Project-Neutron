@@ -27,6 +27,8 @@ struct NeutronSpaceApp {
     launcher: Arc<Mutex<AppLauncher>>,
     /// Whether an import is in progress
     importing: bool,
+    /// Base directory for installed apps (used for APK paths)
+    apps_dir: String,
 }
 
 #[derive(Clone, PartialEq)]
@@ -56,7 +58,7 @@ struct InstalledAppEntry {
 }
 
 impl NeutronSpaceApp {
-    fn new(installer: Arc<Mutex<ApkInstaller>>, launcher: Arc<Mutex<AppLauncher>>) -> Self {
+    fn new(installer: Arc<Mutex<ApkInstaller>>, launcher: Arc<Mutex<AppLauncher>>, apps_dir: String) -> Self {
         Self {
             view: AppView::Main,
             status: "Ready — Tap Import to add APK/XAPK files".into(),
@@ -66,6 +68,7 @@ impl NeutronSpaceApp {
             installer,
             launcher,
             importing: false,
+            apps_dir,
         }
     }
 
@@ -329,11 +332,14 @@ impl NeutronSpaceApp {
                             use neutron_core::{VirtualApp, NativeAbi, ImportSource};
                             use std::time::{SystemTime, UNIX_EPOCH};
 
+                            // Build correct APK path using apps_dir from config
+                            let apk_path = format!("{}/{}/base.apk", self.apps_dir, app_entry.package_name);
+
                             let virtual_app = VirtualApp {
                                 id: app_entry.id,
                                 package_name: app_entry.package_name.clone(),
                                 label: app_entry.name.clone(),
-                                apk_path: format!("/data/data/com.neutron.virtualspace/files/apps/{}/base.apk", app_entry.package_name),
+                                apk_path: apk_path,
                                 abi: NativeAbi::Arm64V8a, // Default, would need to detect properly
                                 version_code: 1,
                                 version_name: app_entry.version.clone(),
@@ -517,7 +523,7 @@ fn android_main(app: android_activity::AndroidApp) {
         "Neutron Space",
         options,
         Box::new(move |_cc| {
-            Ok(Box::new(NeutronSpaceApp::new(installer, launcher)))
+            Ok(Box::new(NeutronSpaceApp::new(installer, launcher, config.apps_dir.clone())))
         }),
     ).unwrap();
 }
