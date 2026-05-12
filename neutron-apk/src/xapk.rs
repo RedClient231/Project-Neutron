@@ -12,20 +12,69 @@ use std::io::Read;
 use std::path::Path;
 use zip::ZipArchive;
 
+/// Helper to deserialize a value that might be a number or a string containing a number.
+fn deserialize_string_or_u64<'de, D>(deserializer: D) -> Result<u64, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    use serde::de;
+    struct StringOrU64;
+    impl<'de> de::Visitor<'de> for StringOrU64 {
+        type Value = u64;
+        fn expecting(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+            f.write_str("a number or a string containing a number")
+        }
+        fn visit_u64<E: de::Error>(self, v: u64) -> Result<u64, E> { Ok(v) }
+        fn visit_i64<E: de::Error>(self, v: i64) -> Result<u64, E> { Ok(v as u64) }
+        fn visit_f64<E: de::Error>(self, v: f64) -> Result<u64, E> { Ok(v as u64) }
+        fn visit_str<E: de::Error>(self, v: &str) -> Result<u64, E> {
+            v.parse::<u64>().map_err(|_| de::Error::custom(format!("cannot parse '{}' as u64", v)))
+        }
+    }
+    deserializer.deserialize_any(StringOrU64)
+}
+
+fn deserialize_string_or_u32<'de, D>(deserializer: D) -> Result<u32, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    use serde::de;
+    struct StringOrU32;
+    impl<'de> de::Visitor<'de> for StringOrU32 {
+        type Value = u32;
+        fn expecting(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+            f.write_str("a number or a string containing a number")
+        }
+        fn visit_u64<E: de::Error>(self, v: u64) -> Result<u32, E> { Ok(v as u32) }
+        fn visit_i64<E: de::Error>(self, v: i64) -> Result<u32, E> { Ok(v as u32) }
+        fn visit_f64<E: de::Error>(self, v: f64) -> Result<u32, E> { Ok(v as u32) }
+        fn visit_str<E: de::Error>(self, v: &str) -> Result<u32, E> {
+            v.parse::<u32>().map_err(|_| de::Error::custom(format!("cannot parse '{}' as u32", v)))
+        }
+    }
+    deserializer.deserialize_any(StringOrU32)
+}
+
 /// XAPK manifest.json structure.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct XapkManifest {
+    #[serde(default)]
     pub package_name: String,
+    #[serde(default)]
     pub name: String,
+    #[serde(default, deserialize_with = "deserialize_string_or_u64")]
     pub version_code: u64,
+    #[serde(default)]
     pub version_name: String,
+    #[serde(default, deserialize_with = "deserialize_string_or_u32")]
     pub min_sdk_version: u32,
+    #[serde(default, deserialize_with = "deserialize_string_or_u32")]
     pub target_sdk_version: u32,
     #[serde(default)]
     pub split_apks: Vec<XapkSplitInfo>,
     #[serde(default)]
     pub expansions: Vec<XapkExpansion>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "deserialize_string_or_u64")]
     pub total_size: u64,
 }
 

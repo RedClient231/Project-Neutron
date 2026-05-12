@@ -274,6 +274,9 @@ impl NeutronSpaceApp {
                     });
                 });
         } else {
+            let mut launch_pkg: Option<String> = None;
+            let mut uninstall_pkg: Option<String> = None;
+
             egui::ScrollArea::vertical().show(ui, |ui| {
                 let apps = self.installed_apps.clone();
                 for app in &apps {
@@ -298,12 +301,32 @@ impl NeutronSpaceApp {
                                             ui.label(egui::RichText::new("GG").color(egui::Color32::from_rgb(255, 152, 0)).size(10.0));
                                         }
                                     });
+                                    ui.horizontal(|ui| {
+                                        if ui.button("Launch").clicked() {
+                                            launch_pkg = Some(app.package_name.clone());
+                                        }
+                                        if ui.button("Uninstall").clicked() {
+                                            uninstall_pkg = Some(app.package_name.clone());
+                                        }
+                                    });
                                 });
                             });
                         });
                     ui.add_space(4.0);
                 }
             });
+
+            // Process actions
+            if let Some(pkg) = launch_pkg {
+                self.status = format!("Launching {}...", pkg);
+                info!("Launch requested: {}", pkg);
+                // TODO: actually launch the virtual process
+            }
+            if let Some(pkg) = uninstall_pkg {
+                self.installed_apps.retain(|a| a.package_name != pkg);
+                self.status = format!("Uninstalled {}", pkg);
+                info!("Uninstalled: {}", pkg);
+            }
         }
     }
 
