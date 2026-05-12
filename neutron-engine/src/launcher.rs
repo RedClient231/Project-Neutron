@@ -8,7 +8,6 @@ use neutron_vfs::{PathRedirector, ProcfsSpoofing, VfsOverlay};
 use log::{debug, error, info};
 
 use crate::process::VirtualProcess;
-use crate::tracer::SyscallTracer;
 use crate::namespace::VirtualNamespace;
 
 /// Orchestrates the launch of virtual apps.
@@ -51,12 +50,8 @@ impl AppLauncher {
 
         // Create and spawn virtual process
         let mut process = VirtualProcess::new(app.clone(), &self.config.vfs_dir);
-        
-        let lib_paths = vec![
-            format!("{}/{}/lib", self.config.apps_dir, app.package_name),
-        ];
-        
-        let pid = process.spawn(&lib_paths)?;
+
+        let pid = process.spawn()?;
         
         // Register in namespace
         namespace.register_process(pid);

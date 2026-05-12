@@ -317,10 +317,55 @@ impl NeutronSpaceApp {
             });
 
             // Process actions
-            if let Some(pkg) = launch_pkg {
+            if let Some(pkg) = launch_pkg.clone() {
                 self.status = format!("Launching {}...", pkg);
                 info!("Launch requested: {}", pkg);
-                // TODO: actually launch the virtual process
+
+                // Find the installed app and launch it
+                if let Some(app_entry) = self.installed_apps.iter().find(|a| a.package_name == pkg) {
+                    match self.launcher.lock() {
+                        Ok(mut launcher) => {
+                            // Create a VirtualApp from the entry
+                            use neutron_core::{VirtualApp, NativeAbi, ImportSource};
+                            use std::time::{SystemTime, UNIX_EPOCH};
+
+                            let virtual_app = VirtualApp {
+                                id: app_entry.id,
+                                package_name: app_entry.package_name.clone(),
+                                label: app_entry.name.clone(),
+                                apk_path: format!("/data/data/com.neutron.virtualspace/files/apps/{}/base.apk", app_entry.package_name),
+                                abi: NativeAbi::Arm64V8a, // Default, would need to detect properly
+                                version_code: 1,
+                                version_name: app_entry.version.clone(),
+                                is_running: false,
+                                pid: 0,
+                                installed_at: SystemTime::now()
+                                    .duration_since(UNIX_EPOCH)
+                                    .unwrap_or_default()
+                                    .as_secs(),
+                                size_bytes: (app_entry.size_mb * 1024.0 * 1024.0) as u64,
+                                split_apks: Vec::new(),
+                                gg_compat: app_entry.gg_compat,
+                            };
+
+                            match launcher.launch(virtual_app) {
+                                Ok(pid) => {
+                                    self.status = format!("Launched {} (pid={})", pkg, pid);
+                                    // Mark as running
+                                    if let Some(entry) = self.installed_apps.iter_mut().find(|a| a.package_name == pkg) {
+                                        entry.is_running = true;
+                                    }
+                                }
+                                Err(e) => {
+                                    self.status = format!("Launch failed: {}", e);
+                                }
+                            }
+                        }
+                        Err(e) => {
+                            self.status = format!("Error: {}", e);
+                        }
+                    }
+                }
             }
             if let Some(pkg) = uninstall_pkg {
                 self.installed_apps.retain(|a| a.package_name != pkg);

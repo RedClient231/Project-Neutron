@@ -31,6 +31,8 @@ pub struct VirtualProcess {
     thread_ids: Vec<u32>,
     /// Environment variables for the virtual process
     env_vars: HashMap<String, String>,
+    /// Native library paths for this app
+    lib_paths: Vec<String>,
 }
 
 impl VirtualProcess {
@@ -49,20 +51,27 @@ impl VirtualProcess {
             keep_alive: AtomicBool::new(true),
             thread_ids: Vec::new(),
             env_vars: Self::default_env_vars(),
+            lib_paths: Vec::new(),
         }
     }
 
     /// Spawn the virtual process.
-    /// 
+    ///
     /// This performs:
     /// 1. fork() via clone syscall
     /// 2. In child: setup environment, load native libs, exec
     /// 3. In parent: ptrace attach for syscall interception
-    pub fn spawn(&mut self, lib_paths: &[String]) -> NeutronResult<u32> {
+    pub fn spawn(&mut self) -> NeutronResult<u32> {
         info!("Spawning virtual process for: {}", self.app.package_name);
 
         // Initialize VFS
         self.vfs.initialize()?;
+
+        // Build library path for this app
+        let lib_dir = format!("{}/{}/lib",
+            self.redirector.get_virtual_root(),
+            self.app.package_name);
+        self.lib_paths = vec![lib_dir];
 
         // Fork child process
         let pid = self.fork_child()?;

@@ -92,6 +92,11 @@ impl PathRedirector {
         }
     }
 
+    /// Get the virtual root directory path.
+    pub fn get_virtual_root(&self) -> &str {
+        &self.virtual_root
+    }
+
     // --- Private ---
 
     fn setup_default_redirects(&mut self) {
