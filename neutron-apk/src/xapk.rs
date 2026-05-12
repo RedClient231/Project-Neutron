@@ -70,16 +70,15 @@ impl XapkParser {
     }
 
     /// Extract all APKs from the XAPK bundle to the target directory.
-    pub fn extract_apks<P: AsRef<Path>>(
-        xapk_path: P,
-        target_dir: P,
+    pub fn extract_apks(
+        xapk_path: &str,
+        target_dir: &std::path::Path,
     ) -> NeutronResult<Vec<String>> {
-        let file = std::fs::File::open(xapk_path.as_ref())?;
+        let file = std::fs::File::open(xapk_path)?;
         let mut archive = ZipArchive::new(file)
             .map_err(|e| NeutronError::ApkParse(format!("Invalid XAPK: {}", e)))?;
 
-        let out_dir = target_dir.as_ref();
-        std::fs::create_dir_all(out_dir)?;
+        std::fs::create_dir_all(target_dir)?;
 
         let mut extracted = Vec::new();
 
@@ -89,7 +88,7 @@ impl XapkParser {
             
             let name = entry.name().to_string();
             if name.ends_with(".apk") {
-                let out_path = out_dir.join(&name);
+                let out_path = target_dir.join(&name);
                 if let Some(parent) = out_path.parent() {
                     std::fs::create_dir_all(parent)?;
                 }
@@ -106,16 +105,15 @@ impl XapkParser {
     }
 
     /// Extract OBB files from the XAPK to the target directory.
-    pub fn extract_obbs<P: AsRef<Path>>(
-        xapk_path: P,
-        target_dir: P,
+    pub fn extract_obbs(
+        xapk_path: &str,
+        target_dir: &std::path::Path,
     ) -> NeutronResult<Vec<String>> {
-        let file = std::fs::File::open(xapk_path.as_ref())?;
+        let file = std::fs::File::open(xapk_path)?;
         let mut archive = ZipArchive::new(file)
             .map_err(|e| NeutronError::ApkParse(format!("Invalid XAPK: {}", e)))?;
 
-        let out_dir = target_dir.as_ref();
-        std::fs::create_dir_all(out_dir)?;
+        std::fs::create_dir_all(target_dir)?;
 
         let mut extracted = Vec::new();
 
@@ -125,7 +123,7 @@ impl XapkParser {
             
             let name = entry.name().to_string();
             if name.ends_with(".obb") {
-                let out_path = out_dir.join(&name);
+                let out_path = target_dir.join(&name);
                 if let Some(parent) = out_path.parent() {
                     std::fs::create_dir_all(parent)?;
                 }

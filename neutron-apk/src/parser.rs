@@ -73,19 +73,18 @@ impl ApkParser {
     }
 
     /// Extract native libraries from the APK to the given directory.
-    pub fn extract_native_libs<P: AsRef<Path>>(
-        apk_path: P,
-        target_dir: P,
+    pub fn extract_native_libs(
+        apk_path: &str,
+        target_dir: &std::path::Path,
         target_abi: NativeAbi,
     ) -> NeutronResult<Vec<String>> {
-        let file = std::fs::File::open(apk_path.as_ref())?;
+        let file = std::fs::File::open(apk_path)?;
         let mut archive = ZipArchive::new(file)
             .map_err(|e| NeutronError::ApkParse(format!("Invalid APK: {}", e)))?;
 
         let abi_dir = target_abi.lib_dir_name();
         let prefix = format!("lib/{}/", abi_dir);
-        let out_dir = target_dir.as_ref();
-        std::fs::create_dir_all(out_dir)?;
+        std::fs::create_dir_all(target_dir)?;
 
         let mut extracted = Vec::new();
 
@@ -96,7 +95,7 @@ impl ApkParser {
             let name = entry.name().to_string();
             if name.starts_with(&prefix) && name.ends_with(".so") {
                 let lib_name = name.rsplit('/').next().unwrap_or(&name);
-                let out_path = out_dir.join(lib_name);
+                let out_path = target_dir.join(lib_name);
                 
                 let mut out_file = std::fs::File::create(&out_path)?;
                 std::io::copy(&mut entry, &mut out_file)?;

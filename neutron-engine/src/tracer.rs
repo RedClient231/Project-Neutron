@@ -66,7 +66,7 @@ impl SyscallTracer {
             return Err(NeutronError::Ptrace {
                 pid: self.pid as i32,
                 request: PTRACE_ATTACH,
-                errno: *unsafe { libc::__errno_location() },
+                errno: std::io::Error::last_os_error().raw_os_error().unwrap_or(-1),
             });
         }
 
@@ -131,7 +131,7 @@ impl SyscallTracer {
             };
 
             if cont_result < 0 {
-                let errno = unsafe { *libc::__errno_location() };
+                let errno = std::io::Error::last_os_error().raw_os_error().unwrap_or(-1);
                 if errno == libc::ESRCH {
                     return Ok(0); // Process gone
                 }
@@ -320,7 +320,7 @@ impl SyscallTracer {
             return Err(NeutronError::Ptrace {
                 pid: self.pid as i32,
                 request: PTRACE_GETREGSET as i64,
-                errno: unsafe { *libc::__errno_location() },
+                errno: std::io::Error::last_os_error().raw_os_error().unwrap_or(-1),
             });
         }
 
@@ -347,7 +347,7 @@ impl SyscallTracer {
             return Err(NeutronError::Ptrace {
                 pid: self.pid as i32,
                 request: PTRACE_SETREGSET as i64,
-                errno: unsafe { *libc::__errno_location() },
+                errno: std::io::Error::last_os_error().raw_os_error().unwrap_or(-1),
             });
         }
 

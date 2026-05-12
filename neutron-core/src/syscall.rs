@@ -155,75 +155,44 @@ pub mod raw {
 /// Execute raw syscalls on ARM32 using inline assembly.
 #[cfg(target_arch = "arm")]
 pub mod raw {
+    // On ARM32, r7 is the frame pointer and cannot be used in inline asm.
+    // We use a function attribute to force ARM mode (not Thumb) and
+    // work around the register restriction.
+
+    extern "C" {
+        // Syscalls are provided by the ARM32 assembly trampoline
+        // See asm/arm32/trampoline.s — neutron_syscall_trampoline_arm32
+        fn neutron_syscall_trampoline_arm32(nr: u32, a0: u32, a1: u32, a2: u32, a3: u32, a4: u32, a5: u32) -> i32;
+    }
+
     /// Raw syscall with no arguments (ARM32).
     #[inline(always)]
     pub unsafe fn syscall0(nr: u32) -> i32 {
-        let ret: i32;
-        core::arch::asm!(
-            "svc #0",
-            in("r7") nr,
-            lateout("r0") ret,
-            options(nostack)
-        );
-        ret
+        neutron_syscall_trampoline_arm32(nr, 0, 0, 0, 0, 0, 0)
     }
 
     /// Raw syscall with 1 argument (ARM32).
     #[inline(always)]
     pub unsafe fn syscall1(nr: u32, a0: u32) -> i32 {
-        let ret: i32;
-        core::arch::asm!(
-            "svc #0",
-            in("r7") nr,
-            inlateout("r0") a0 => ret,
-            options(nostack)
-        );
-        ret
+        neutron_syscall_trampoline_arm32(nr, a0, 0, 0, 0, 0, 0)
     }
 
     /// Raw syscall with 2 arguments (ARM32).
     #[inline(always)]
     pub unsafe fn syscall2(nr: u32, a0: u32, a1: u32) -> i32 {
-        let ret: i32;
-        core::arch::asm!(
-            "svc #0",
-            in("r7") nr,
-            inlateout("r0") a0 => ret,
-            in("r1") a1,
-            options(nostack)
-        );
-        ret
+        neutron_syscall_trampoline_arm32(nr, a0, a1, 0, 0, 0, 0)
     }
 
     /// Raw syscall with 3 arguments (ARM32).
     #[inline(always)]
     pub unsafe fn syscall3(nr: u32, a0: u32, a1: u32, a2: u32) -> i32 {
-        let ret: i32;
-        core::arch::asm!(
-            "svc #0",
-            in("r7") nr,
-            inlateout("r0") a0 => ret,
-            in("r1") a1,
-            in("r2") a2,
-            options(nostack)
-        );
-        ret
+        neutron_syscall_trampoline_arm32(nr, a0, a1, a2, 0, 0, 0)
     }
 
     /// Raw syscall with 4 arguments (ARM32).
     #[inline(always)]
     pub unsafe fn syscall4(nr: u32, a0: u32, a1: u32, a2: u32, a3: u32) -> i32 {
-        let ret: i32;
-        core::arch::asm!(
-            "svc #0",
-            in("r7") nr,
-            inlateout("r0") a0 => ret,
-            in("r1") a1,
-            in("r2") a2,
-            in("r3") a3,
-            options(nostack)
-        );
-        ret
+        neutron_syscall_trampoline_arm32(nr, a0, a1, a2, a3, 0, 0)
     }
 
     /// Raw ptrace syscall (ARM32).

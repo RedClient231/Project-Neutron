@@ -9,11 +9,11 @@ license.workspace = true
 neutron-core = { path = "../neutron-core" }
 neutron-apk = { path = "../neutron-apk" }
 neutron-engine = { path = "../neutron-engine" }
-slint.workspace = true
 log.workspace = true
 anyhow.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 
 [build-dependencies]
-slint-build = "1.9"
+# slint-build is used at compile time on CI where ANDROID_HOME is set
+# slint-build = "1.9"
